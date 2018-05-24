@@ -1,0 +1,3 @@
+Biopython
+numpy
+pandas
