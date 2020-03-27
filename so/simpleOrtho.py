@@ -23,7 +23,7 @@ def get_args(DEBUG=False):
         description="This does some simple reciprocol blasting to get region of interest")
     parser.add_argument("db_aa",
                         help="fasta containing gene accessions")
-    parser.add_argument("genomes_dir", help="dir with and only iwth genomes")
+    parser.add_argument("genomes_dir", help="dir with and only with genomes")
     parser.add_argument("-o", "--output", dest='output',
                         help="directory in which to place the output files",
                         default=os.path.join(os.getcwd(), "simpleOrtho"))
@@ -155,7 +155,7 @@ def make_prot_nuc_recip_blast_cmds(
         out=nucdb,
         logger=logger,
         title="genome")
-    
+
     blast_cmds = []
     blast_outputs = []
     recip_blast_outputs = []
@@ -425,10 +425,10 @@ def main(args):
                         if counter > 100:
                             fcounter = fcounter + 1
                             counter = 0
-                    
+
         # and then get the paths of the new dir of sequences
         genomes = get_complete_paths_of_files(new_genomes_dir)
-        
+
     logger.debug("Allocating cores")
     # get cores, etc
     if args.threads < len(genomes):
