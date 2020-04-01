@@ -13,6 +13,8 @@ import logging
 import time
 import pandas as pd
 from Bio import SeqIO
+from Bio.SeqRecord import SeqRecord
+from Bio.Seq import Seq
 from Bio.Blast.Applications import NcbiblastxCommandline
 from Bio.Blast.Applications import NcbitblastnCommandline
 from Bio.Blast.Applications import NcbitblastxCommandline
@@ -20,10 +22,12 @@ from Bio.Blast.Applications import NcbitblastxCommandline
 
 def get_args(DEBUG=False):
     parser = argparse.ArgumentParser(
-        description="This does some simple reciprocol blasting to get region of interest")
-    parser.add_argument("db_aa",
+        description="This does some simple reciprocol blasting to get " +
+        "region of interest from one or more genomes")
+    parser.add_argument("-i", "--input", dest="db_aa",
                         help="fasta containing gene accessions")
-    parser.add_argument("genomes_dir", help="dir with and only with genomes")
+    parser.add_argument("-d", "--genomes_dir",
+                        help="dir with and only with genomes")
     parser.add_argument("-o", "--output", dest='output',
                         help="directory in which to place the output files",
                         default=os.path.join(os.getcwd(), "simpleOrtho"))
@@ -40,6 +44,11 @@ def get_args(DEBUG=False):
     parser.add_argument("-n", "--nucleotide", dest="nucleotide",
                         help="genes are written as nucleotides",
                         action="store_true")
+    parser.add_argument("-k", "--nkeep", dest="nkeep",
+                        help="max number of sequences, applied to " +
+                        # "max_target_seqs, " +
+                        "num_descriptions, " +
+                        "num_alignments", type=int, default=500)
     parser.add_argument("-s", "--split_names", dest="split_names",
                         help="when parsing names in blast results, " +
                         "only consider the prefix before the " +
@@ -51,42 +60,34 @@ def get_args(DEBUG=False):
                         dest='verbosity', action="store",
                         default=2, type=int,
                         help="1 = debug(), 2 = info(), 3 = warning(), " +
-                        "4 = error() and 5 = critical(); " +
+                        "4 = error(), and 5 = critical(); " +
                         "default: %(default)s")
     args = parser.parse_args()
     return(args)
 
 
-
-def set_up_logging(outdir, level):
-    """
-    """
-    logger = logging.getLogger('root')
-    logger.setLevel(logging.DEBUG)
-    # create console handler and set level to given verbosity
+def set_up_logging(outdir, level):  # pragma: nocover
+    if level not in range(10, 60, 10):
+        raise ValueError('Invalid log level: %s' % level)
+    logging.basicConfig(
+        level=logging.DEBUG,
+        filemode='w',
+        filename=os.path.join(outdir, "simpleOrtho.log"),
+        format="%(asctime)s - %(levelname)s - %(message)s",
+    )
+    logger = logging.getLogger(__name__)
     console_err = logging.StreamHandler(sys.stderr)
-    console_err.setLevel(level=level*10)
-    console_err_format = logging.Formatter(str("%(asctime)s - " +
-                                               "%(levelname)s - %(message)s"),
-                                           "%Y%m%d %H:%M:%S")
+    console_err.setLevel(level=level)
+    console_err_format = logging.Formatter(
+        str("%(asctime)s \u001b[3%(levelname)s\033[1;0m  %(message)s"),
+        "%H:%M:%S")
     console_err.setFormatter(console_err_format)
+    logging.addLevelName(logging.DEBUG,    "4m --")
+    logging.addLevelName(logging.INFO,     "2m ==")
+    logging.addLevelName(logging.WARNING,  "3m !!")
+    logging.addLevelName(logging.ERROR,    "1m xx")
+    logging.addLevelName(logging.CRITICAL, "1m XX")
     logger.addHandler(console_err)
-    # create debug file handler and set level to debug
-    try:
-        logfile_handler = logging.FileHandler(
-            os.path.join(outdir,
-                         str("{0}_{1}_log.txt".format(
-                             time.strftime("%Y%m%d%H%M"), "simpleOrtho"))), "w")
-        logfile_handler.setLevel(logging.DEBUG)
-        logfile_handler_formatter = \
-            logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
-        logfile_handler.setFormatter(logfile_handler_formatter)
-        logger.addHandler(logfile_handler)
-    except:
-        logger.error("Could not write log file to {0} for logging".format(
-            outdir))
-        sys.exit(1)
-    logger.info("Initializing logger")
     return logger
 
 
@@ -139,15 +140,12 @@ def make_prot_nuc_recip_blast_cmds(
     os.makedirs(db_dir, exist_ok=True)
     protdb = os.path.join(db_dir,
         os.path.splitext(os.path.basename(subject_file))[0])
-
     nucdb = os.path.join(db_dir, "genomes")
-
     setup_blast_db(
         input_file=args.db_aa,
         input_type="fasta",
         dbtype="prot",
         out=protdb, logger=logger)
-
     setup_blast_db(
         input_file=os.path.join(os.path.dirname(query_list[0]), "", "*"),
         input_type="fasta",
@@ -155,7 +153,6 @@ def make_prot_nuc_recip_blast_cmds(
         out=nucdb,
         logger=logger,
         title="genome")
-
     blast_cmds = []
     blast_outputs = []
     recip_blast_outputs = []
@@ -164,10 +161,14 @@ def make_prot_nuc_recip_blast_cmds(
         output_path_tab = str(
             os.path.join(output, date) + "_simpleOrtho_results_" +
             os.path.basename(f) + "_vs_protdb.tab")
-        blast_cline = NcbiblastxCommandline(query=f,
-                                            db=protdb, evalue=.001,
-                                            outfmt=6, out=output_path_tab)
-        add_params = str(" -num_threads %i -num_alignments 20" % threads)
+        blast_cline = NcbiblastxCommandline(
+            query=f,
+            max_target_seqs=args.nkeep,
+            db=protdb,
+            evalue=.001,
+            outfmt=6,
+            out=output_path_tab)
+        add_params = str(" -num_threads %i" % threads)
         blast_command = str(str(blast_cline) + add_params)
         blast_cmds.append(blast_command)
         blast_outputs.append(output_path_tab)
@@ -175,14 +176,17 @@ def make_prot_nuc_recip_blast_cmds(
         recip_output_path_tab = str(
             os.path.join(output, date) + "_simpleOrtho_results_" +
             "prot_vs_" + os.path.basename(f) + ".tab")
-        recip_blast_cline = NcbitblastnCommandline(query=subject_file,
-                                                   db=nucdb,
-                                                   evalue=.001,
-                                                   outfmt=6, out=recip_output_path_tab)
-        recip_blast_command = str(str(recip_blast_cline) + str(" -num_threads %i -num_alignments 20" % recip_threads))
+        recip_blast_cline = NcbitblastnCommandline(
+            query=subject_file,
+            max_target_seqs=args.nkeep,
+            db=nucdb,
+            evalue=.001,
+            outfmt=6, out=recip_output_path_tab)
+        recip_blast_command = str(
+            str(recip_blast_cline) +
+            str(" -num_threads %i" % recip_threads))
         blast_cmds.append(recip_blast_command)
         recip_blast_outputs.append(recip_output_path_tab)
-
     return(blast_cmds, recip_blast_command, blast_outputs, recip_blast_outputs)
 
 
@@ -213,9 +217,11 @@ def make_nuc_nuc_recip_blast_cmds(
         output_path_tab = str(
             os.path.join(output, date) + "_simpleOrtho_results_" +
             os.path.basename(f) + "_vs_nucdb.tab")
-        blast_cline = NcbitblastxCommandline(query=f,
-                                            db=protdb, evalue=.001,
-                                            outfmt=6, out=output_path_tab)
+        blast_cline = NcbitblastxCommandline(
+            query=f,
+            max_target_seqs=args.nkeep,
+            db=protdb, evalue=.001,
+            outfmt=6, out=output_path_tab)
         add_params = str(" -num_threads %i" % threads)
         blast_command = str(str(blast_cline) + add_params)
         blast_cmds.append(blast_command)
@@ -224,14 +230,16 @@ def make_nuc_nuc_recip_blast_cmds(
     recip_output_path_tab = str(
         os.path.join(output, date) + "_simpleOrtho_results_" +
         "nuc_vs_genomes.tab")
-    recip_blast_cline = NcbitblastxCommandline(query=subject_file,
-                                               db=nucdb,
-                                               evalue=.001,
-                                               outfmt=6, out=recip_output_path_tab)
+    recip_blast_cline = NcbitblastxCommandline(
+        query=subject_file,
+        max_target_seqs=args.nkeep,
+        db=nucdb,
+        evalue=.001,
+        outfmt=6,
+        out=recip_output_path_tab)
     recip_blast_command = str(str(recip_blast_cline) + str(" -num_threads %i" % recip_threads))
     # blast_cmds.append(recip_blast_command)
     recip_blast_outputs.append(recip_output_path_tab)
-
     return(blast_cmds, recip_blast_command, blast_outputs, recip_blast_outputs)
 
 
@@ -407,10 +415,20 @@ def main(args):
     date = str(datetime.datetime.now().strftime('%Y%m%d'))
     if not os.path.isfile(args.db_aa):
         raise FileNotFoundError("Input file %s not found!" % args.db_aa)
+    # if args.nucleotide:
+    #     newpath = os.path.join(args.output, "tmp.faa")
+    #     with open(args.db_aa, "r") as inf, open(newpath, "w") as outf:
+    #         for rec in SeqIO.parse(inf, "fasta"):
+    #             print(rec)
+    #             SeqIO.write(SeqRecord(rec.seq.translate(), id=rec.id), outf, "fasta")
+    #     args.db_aa = newpath
+
     genomes = get_complete_paths_of_files(args.genomes_dir)
-    print(genomes)
     if len(genomes) == 1:
-        # if just one genome, lets split it up like an assesmbly into its contigs.  This front-ends some of the issues with massive files, and helps overcome the issue with blast's "num_threads" being next to useless
+        # if just one genome, lets split it up like an assesmbly into its
+        # contigs.  This front-ends some of the issues with massive files,
+        # and helps overcome the issue with blast's "num_threads" being #
+        # next to useless
         logger.debug("writing out subject as individual sequences")
         new_genomes_dir = os.path.join(args.output, "split_genome", "")
         os.makedirs(new_genomes_dir)
@@ -425,7 +443,6 @@ def main(args):
                         if counter > 100:
                             fcounter = fcounter + 1
                             counter = 0
-
         # and then get the paths of the new dir of sequences
         genomes = get_complete_paths_of_files(new_genomes_dir)
 
@@ -453,7 +470,6 @@ def main(args):
                 subject_file=args.db_aa,
                 output=output_root, date=date,
                 logger=logger)
-
     # check for existing blast results
     if not all([os.path.isfile(x) for x in paths_to_outputs]):
         if EXISTING_DIR:
@@ -484,7 +500,6 @@ def main(args):
                        shell=sys.platform != "win32",
                        stdout=subprocess.PIPE,
                        stderr=subprocess.PIPE, check=True)
-
     else:
         pass
     merged_tab = os.path.join(output_root,
@@ -503,9 +518,11 @@ def main(args):
         min_percent=args.min_percent,
         split_names=args.split_names,
         logger=logger)
-    write_pipe_extract_cmds(outfile=os.path.join(output_root,
-                                                 "simpleOrtho_regions.txt"),
-                            df=filtered_hits, logger=logger)
+    write_pipe_extract_cmds(
+        outfile=os.path.join(output_root, "simpleOrtho_regions.txt"),
+        df=filtered_hits,
+        logger=logger)
+
 
 if __name__ == '__main__':
     assert ((sys.version_info[0] == 3) and (sys.version_info[1] >= 5)), \
