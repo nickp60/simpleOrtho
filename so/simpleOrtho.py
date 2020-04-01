@@ -25,7 +25,9 @@ def get_args(DEBUG=False):
         description="This does some simple reciprocol blasting to get " +
         "region of interest from one or more genomes")
     parser.add_argument("-i", "--input", dest="db_aa",
-                        help="fasta containing gene accessions")
+                        help="fasta containing gene accessions;" +
+                        " If reading from stdin, use '-'",
+                        default="-")
     parser.add_argument("-d", "--genomes_dir",
                         help="dir with and only with genomes")
     parser.add_argument("-o", "--output", dest='output',
@@ -413,6 +415,12 @@ def main(args):
     for k, v in sorted(vars(args).items()):
         logger.debug("{0}: {1}".format(k, v))
     date = str(datetime.datetime.now().strftime('%Y%m%d'))
+    if args.db_aa == "-":
+        newpath = os.path.join(args.output, "tmp_from_stdin.fasta")
+        with open(newpath, "w") as outf:
+            for seq in SeqIO.parse(sys.stdin, "fasta"):
+                SeqIO.write(seq, outf, "fasta")
+        args.db_aa = newpath
     if not os.path.isfile(args.db_aa):
         raise FileNotFoundError("Input file %s not found!" % args.db_aa)
     # if args.nucleotide:
