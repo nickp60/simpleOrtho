@@ -21,7 +21,7 @@ This outputs coordinates in the following format.
 NC_000913.3:c3883729-3882326-RC@BA000007.2 :4668559:4669629
 <query sequenceID><-RC if on - strand>:<subject sequence id> :<start>:<end>
 ```
-
+ If no hit is found, it ouputs `NA`
 
 ## Installation
 

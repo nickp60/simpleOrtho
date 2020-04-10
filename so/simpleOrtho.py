@@ -46,6 +46,9 @@ def get_args(DEBUG=False):
     parser.add_argument("-n", "--nucleotide", dest="nucleotide",
                         help="genes are written as nucleotides",
                         action="store_true")
+    parser.add_argument("--dontcheck", dest="dontcheck",
+                        help="dont both double checking that query is protein",
+                        action="store_true")
     parser.add_argument("-k", "--nkeep", dest="nkeep",
                         help="max number of sequences, applied to " +
                         # "max_target_seqs, " +
@@ -320,7 +323,7 @@ def filter_recip_BLAST_df(df1, df2, min_percent, split_names=False, logger=None)
             tempdf2 = df2.loc[(df2["query_id"] == gene) &
                               (df2["genome"] == genome), ]
             if tempdf1.empty or tempdf2.empty:
-                logger.info("skipping %s in %s", gene, genome)
+                logger.info("No hits for %s in %s", gene, genome)
             else:
                 subset1 = tempdf1.loc[
                     (tempdf1["identity_perc"] > min_percent) &
@@ -423,6 +426,19 @@ def main(args):
         args.db_aa = newpath
     if not os.path.isfile(args.db_aa):
         raise FileNotFoundError("Input file %s not found!" % args.db_aa)
+    warn_nuc_query = False
+    if not args.nucleotide:
+        chars = []
+        with open(args.db_aa, "r") as inf:
+            for i, line in enumerate(inf):
+                if i != 0:
+                    for char in set(list(line.strip())):
+                        if char not in chars:
+                            chars.append(char)
+        if len(chars) <= 4:
+            warn_nuc_query = True
+            logger.warning("This may be DNA query, should you " +
+                           "have used the --nucleotide arg?")
     # if args.nucleotide:
     #     newpath = os.path.join(args.output, "tmp.faa")
     #     with open(args.db_aa, "r") as inf, open(newpath, "w") as outf:
@@ -526,10 +542,18 @@ def main(args):
         min_percent=args.min_percent,
         split_names=args.split_names,
         logger=logger)
-    write_pipe_extract_cmds(
-        outfile=os.path.join(output_root, "simpleOrtho_regions.txt"),
-        df=filtered_hits,
-        logger=logger)
+    if filtered_hits.empty:
+        if warn_nuc_query:
+            logger.error("No hit detected, are you sure this is a " +
+                           "protein query sequennce? Exiting with code 0")
+        else:
+            logger.warning("No hit detected! Exiting with code 0")
+        sys.exit(0)
+    else:
+        write_pipe_extract_cmds(
+            outfile=os.path.join(output_root, "simpleOrtho_regions.txt"),
+            df=filtered_hits,
+            logger=logger)
 
 
 if __name__ == '__main__':
