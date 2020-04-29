@@ -11,6 +11,7 @@ import argparse
 import multiprocessing
 import logging
 import time
+from tempfile import TemporaryDirectory
 import pandas as pd
 from Bio import SeqIO
 from Bio.SeqRecord import SeqRecord
@@ -29,10 +30,10 @@ def get_args(DEBUG=False):
                         " If reading from stdin, use '-'",
                         default="-")
     parser.add_argument("-d", "--genomes_dir",
-                        help="dir with and only with genomes")
+                        help="dir with and only with genomes; or a single genome")
     parser.add_argument("-o", "--output", dest='output',
-                        help="directory in which to place the output files",
-                        default=os.path.join(os.getcwd(), "simpleOrtho"))
+                        help="directory in which to place the output files")
+                        # default=os.path.join(os.getcwd(), "simpleOrtho"))
     parser.add_argument("-p", "--min_percent", dest="min_percent",
                         help="minimum percent identity",
                         default=85, type=int)
@@ -134,7 +135,7 @@ def setup_blast_db(input_file, input_type="fasta", dbtype="prot",
 
 def make_prot_nuc_recip_blast_cmds(
         query_list, date, threads, recip_threads,
-        output, subject_file=None, logger=None):
+        output, args, subject_file=None, logger=None):
     """given a file, make a blast cmd, and return path to output csv
     Only works is query_list is nucleotide and subject_file is protein
     """
@@ -197,7 +198,7 @@ def make_prot_nuc_recip_blast_cmds(
 
 def make_nuc_nuc_recip_blast_cmds(
         query_list, date, threads, recip_threads,
-        output, subject_file=None, logger=None):
+        output, args, subject_file=None, logger=None):
     """given a file, make a blast cmd, and return path to output csv
     Only works is query_list is nucleotide and subject_file is nuc
     """
@@ -249,11 +250,14 @@ def make_nuc_nuc_recip_blast_cmds(
 
 
 def get_complete_paths_of_files(directory):
-    filenames = []
-    shortnames = [i for i in os.listdir(directory) if not os.path.isdir(os.path.join(directory, i))]
-    for i in shortnames:
-        filenames.append(os.path.join(directory, i))
-    return(filenames)
+    if os.path.isfile(directory):
+        return [directory]
+    else:
+        filenames = []
+        shortnames = [i for i in os.listdir(directory) if not os.path.isdir(os.path.join(directory, i))]
+        for i in shortnames:
+            filenames.append(os.path.join(directory, i))
+        return(filenames)
 
 
 def merge_outfiles(filelist, outfile_name):
@@ -399,15 +403,21 @@ def write_pipe_extract_cmds(df, outfile, logger=None):
             outf.write(line + "\n")
 
 
-def main(args):
+def main(args=None):
+    if args is None:
+        args = get_args()
     EXISTING_DIR = False
-    output_root = os.path.abspath(os.path.expanduser(args.output))
-    if not os.path.isdir(output_root):
-        sys.stderr.write("creating output directory %s\n" % output_root)
-        os.makedirs(output_root)
+    if args.output is None:
+        tmpdirname = TemporaryDirectory()
+        output_root = tmpdirname.name
     else:
-        sys.stderr.write("Output Directory already exists!\n")
-        EXISTING_DIR = True
+        output_root = os.path.abspath(os.path.expanduser(args.output))
+        if not os.path.isdir(output_root):
+            sys.stderr.write("creating output directory %s\n" % output_root)
+            os.makedirs(output_root)
+        else:
+            sys.stderr.write("Output Directory already exists!\n")
+            EXISTING_DIR = True
         # sys.exit(1)
     # logger = logging.getLogger('simpleOrtho')
     logger = set_up_logging(outdir=output_root, level=args.verbosity*10)
@@ -417,9 +427,11 @@ def main(args):
     logger.debug("All settings used:")
     for k, v in sorted(vars(args).items()):
         logger.debug("{0}: {1}".format(k, v))
+    logger.debug("output directory: " + output_root)
     date = str(datetime.datetime.now().strftime('%Y%m%d'))
     if args.db_aa == "-":
-        newpath = os.path.join(args.output, "tmp_from_stdin.fasta")
+        newpath = os.path.join(output_root, "tmp_from_stdin.fasta")
+        sys.stderr.write("waiting for input on stdin\n")
         with open(newpath, "w") as outf:
             for seq in SeqIO.parse(sys.stdin, "fasta"):
                 SeqIO.write(seq, outf, "fasta")
@@ -454,7 +466,7 @@ def main(args):
         # and helps overcome the issue with blast's "num_threads" being #
         # next to useless
         logger.debug("writing out subject as individual sequences")
-        new_genomes_dir = os.path.join(args.output, "split_genome", "")
+        new_genomes_dir = os.path.join(output_root, "split_genome", "")
         os.makedirs(new_genomes_dir)
         with open(genomes[0], "r") as inf:
             fcounter = 0
@@ -481,6 +493,7 @@ def main(args):
             make_prot_nuc_recip_blast_cmds(
                 query_list=genomes,
                 threads=threads,
+                args=args,
                 recip_threads=args.threads,
                 subject_file=args.db_aa,
                 output=output_root, date=date,
@@ -490,6 +503,7 @@ def main(args):
             make_nuc_nuc_recip_blast_cmds(
                 query_list=genomes,
                 threads=threads,
+                args=args,
                 recip_threads=args.threads,
                 subject_file=args.db_aa,
                 output=output_root, date=date,

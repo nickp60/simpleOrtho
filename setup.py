@@ -62,8 +62,12 @@ setup(
     ],
     keywords='bioinformatics genomics orthology',
     install_requires=requirements,
+    entry_points={
+       'console_scripts': [
+           'simpleOrtho=so.simpleOrtho:main',
+       ],
+    },
     scripts=[
-        'so/simpleOrtho.py',
         "so/prepareOrthoMSA.py"
     ],
 )
